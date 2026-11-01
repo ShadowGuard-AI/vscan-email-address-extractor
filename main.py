@@ -38,6 +38,10 @@ def extract_emails_from_url(url):
         response = requests.get(url, timeout=10)  # Add timeout to prevent indefinite hanging
         response.raise_for_status()  # Raise HTTPError for bad responses (4xx or 5xx)
         soup = BeautifulSoup(response.content, 'html.parser')
+        # get_text keeps only visible text. Addresses that live in mailto
+        # hrefs, in meta tags, in scripts, or in HTML comments are dropped by
+        # the parse before the regex ever runs, and those are common places
+        # for a contact address to sit.
         text = soup.get_text()
         emails = set(re.findall(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}", text))
         return emails
@@ -62,6 +66,10 @@ def extract_emails_from_file(file_path):
     try:
         with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
             text = f.read()
+        # The pattern needs a dot and at least two letters at the end, so
+        # addresses under a one letter or numeric ending never match. It
+        # also matches inside longer strings, so the middle of a token can
+        # be harvested as an address that nobody wrote.
         emails = set(re.findall(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}", text))
         return emails
     except FileNotFoundError:
@@ -91,6 +99,10 @@ def extract_emails_from_directory(directory_path, recursive=False):
                 emails = extract_emails_from_file(file_path)
                 if emails is not None:
                     all_emails.update(emails)
+            # The break still walks the top directory fully first. A directory
+            # whose files all failed to read returns an empty set rather than
+            # None, because per file failures are swallowed in the loop above,
+            # so main exits 0 and reports a successful empty extraction.
             if not recursive:
                 break
         return all_emails
@@ -144,6 +156,9 @@ def main():
     if output_file:
         save_emails_to_file(emails, output_file)
     else:
+        # Results live in a set end to end, so print order and saved file
+        # order change from run to run with hash randomisation. Diffing two
+        # saved outputs shows churn that is not a change in findings.
         for email in emails:
             print(email)
 

@@ -4,6 +4,7 @@ import requests
 from bs4 import BeautifulSoup
 import logging
 import os
+import sys
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -134,11 +135,11 @@ def main():
         emails = extract_emails_from_directory(source, recursive)
     else:
         logging.error("Invalid source provided.  Must be a URL, file, or directory.")
-        return
+        sys.exit(1)
 
     if emails is None:
         logging.error("No emails extracted or an error occurred.")
-        return
+        sys.exit(1)
 
     if output_file:
         save_emails_to_file(emails, output_file)

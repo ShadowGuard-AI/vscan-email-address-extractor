@@ -7,6 +7,8 @@ Extracts email addresses from web pages, files and directories. Useful for gathe
 ## Usage
 `./vscan-email-address-extractor [params]`
 
+If the source is invalid or cannot be read, the tool prints an error and exits with status 1. A source that reads correctly keeps the normal exit status 0.
+
 ## Parameters
 - `-h`: Show help message and exit
 - `-r`: Recursively search directories.

@@ -38,12 +38,16 @@ def extract_emails_from_url(url):
         response = requests.get(url, timeout=10)  # Add timeout to prevent indefinite hanging
         response.raise_for_status()  # Raise HTTPError for bad responses (4xx or 5xx)
         soup = BeautifulSoup(response.content, 'html.parser')
-        # get_text keeps only visible text. Addresses that live in mailto
-        # hrefs, in meta tags, in scripts, or in HTML comments are dropped by
-        # the parse before the regex ever runs, and those are common places
-        # for a contact address to sit.
-        text = soup.get_text()
-        emails = set(re.findall(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}", text))
+        # Search both the visible text and the raw page source. The raw
+        # source is where mailto hrefs, meta tags, scripts, and HTML
+        # comments live, and those are common places for a contact
+        # address to sit; visible text alone drops all of them.
+        pattern = r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}"
+        emails = set(re.findall(pattern, soup.get_text()))
+        raw = response.content
+        if isinstance(raw, bytes):
+            raw = raw.decode('utf-8', errors='ignore')
+        emails.update(re.findall(pattern, raw))
         return emails
     except requests.exceptions.RequestException as e:
         logging.error(f"Error fetching URL {url}: {e}")
@@ -66,10 +70,8 @@ def extract_emails_from_file(file_path):
     try:
         with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
             text = f.read()
-        # The pattern needs a dot and at least two letters at the end, so
-        # addresses under a one letter or numeric ending never match. It
-        # also matches inside longer strings, so the middle of a token can
-        # be harvested as an address that nobody wrote.
+        # The pattern requires a dot and at least two letters at the
+        # end, matching real top level domains.
         emails = set(re.findall(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}", text))
         return emails
     except FileNotFoundError:
@@ -92,19 +94,25 @@ def extract_emails_from_directory(directory_path, recursive=False):
         set: A set of unique email addresses found in the directory. Returns None on error.
     """
     all_emails = set()
+    files_seen = 0
+    files_failed = 0
     try:
         for root, _, files in os.walk(directory_path):
             for file in files:
                 file_path = os.path.join(root, file)
+                files_seen += 1
                 emails = extract_emails_from_file(file_path)
-                if emails is not None:
+                if emails is None:
+                    files_failed += 1
+                else:
                     all_emails.update(emails)
-            # The break still walks the top directory fully first. A directory
-            # whose files all failed to read returns an empty set rather than
-            # None, because per file failures are swallowed in the loop above,
-            # so main exits 0 and reports a successful empty extraction.
             if not recursive:
                 break
+        # If files were found but every one failed to read, that is an
+        # error, not a successful empty extraction.
+        if files_seen and files_failed == files_seen:
+            logging.error(f"All {files_seen} files in {directory_path} failed to read.")
+            return None
         return all_emails
     except Exception as e:
         logging.error(f"Error processing directory {directory_path}: {e}")
@@ -121,11 +129,13 @@ def save_emails_to_file(emails, output_file):
     """
     try:
         with open(output_file, 'w') as f:
-            for email in emails:
+            for email in sorted(emails):
                 f.write(email + '\n')
         logging.info(f"Extracted emails saved to {output_file}")
+        return True
     except Exception as e:
         logging.error(f"Error saving emails to file: {e}")
+        return False
 
 
 def main():
@@ -154,12 +164,12 @@ def main():
         sys.exit(1)
 
     if output_file:
-        save_emails_to_file(emails, output_file)
+        if not save_emails_to_file(emails, output_file):
+            sys.exit(1)
     else:
-        # Results live in a set end to end, so print order and saved file
-        # order change from run to run with hash randomisation. Diffing two
-        # saved outputs shows churn that is not a change in findings.
-        for email in emails:
+        # Output is sorted so repeated runs over the same source print
+        # and save in the same order.
+        for email in sorted(emails):
             print(email)
 
     logging.info("Email extraction complete.")
